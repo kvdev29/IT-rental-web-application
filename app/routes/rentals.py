@@ -1,0 +1,263 @@
+from datetime import date, datetime, timedelta
+
+from flask import Blueprint, render_template, redirect, url_for, flash, request
+from flask_login import login_required, current_user
+
+from app.models import db, RentalItem, Rental, AuditLog, Notification
+from app.utils.forms import RentalRequestForm, RentalItemForm
+from app.utils.security import log_event, admin_required
+
+rentals_bp = Blueprint('rentals', __name__)
+
+
+def _sync_overdue():
+    """Mark any Active rentals past their return date as Overdue."""
+    today = date.today()
+    overdue = Rental.query.filter(
+        Rental.status == Rental.STATUS_ACTIVE,
+        Rental.return_by < today,
+    ).all()
+    for r in overdue:
+        r.status = Rental.STATUS_OVERDUE
+    if overdue:
+        db.session.commit()
+
+
+# User routes
+
+@rentals_bp.route('/')
+@login_required
+def catalog():
+    """Browse devices available for rental, optionally filtered by location."""
+    _sync_overdue()
+    from app.models import RentalItem as RI
+    location = request.args.get('location', RI.LOCATION_CHOICES[0])
+    if location not in RI.LOCATION_CHOICES:
+        location = RI.LOCATION_CHOICES[0]
+    items = (RentalItem.query
+             .filter_by(is_active=True, location=location)
+             .order_by(RentalItem.category, RentalItem.name)
+             .all())
+    return render_template('rentals/catalog.html', items=items,
+                           locations=RI.LOCATION_CHOICES, active_location=location)
+
+
+@rentals_bp.route('/request/<int:item_id>', methods=['GET', 'POST'])
+@login_required
+def request_rental(item_id):
+    """Request to rent a specific item."""
+    item = RentalItem.query.get_or_404(item_id)
+
+    if not item.is_available:
+        flash(f'Sorry, {item.name} is not available right now.', 'warning')
+        return redirect(url_for('rentals.catalog'))
+
+    max_days = 1 if current_user.is_guest else 7
+    max_return = date.today() + timedelta(days=max_days)
+    form = RentalRequestForm()
+    if form.validate_on_submit():
+        if form.return_by.data < date.today():
+            flash('Return date cannot be in the past.', 'danger')
+            return render_template('rentals/request.html', form=form, item=item, max_return=max_return)
+        if form.return_by.data > max_return:
+            limit = '1 day' if current_user.is_guest else '7 days'
+            flash(f'Rentals are limited to {limit} for your account type. Please choose an earlier return date.', 'danger')
+            return render_template('rentals/request.html', form=form, item=item, max_return=max_return)
+
+        rental = Rental(
+            item_id=item.id,
+            user_id=current_user.id,
+            return_by=form.return_by.data,
+            notes=form.notes.data or '',
+            status=Rental.STATUS_ACTIVE,
+        )
+        db.session.add(rental)
+        db.session.commit()
+
+        log_event(
+            event_type=AuditLog.EVENT_CREATE,
+            description=(f'{current_user.username} rented "{item.name}" '
+                         f'(return by {form.return_by.data.strftime("%d %b %Y")})'),
+            resource_type='Rental',
+            resource_id=rental.id,
+        )
+
+        flash(
+            f'{item.name} is yours! Please return it by '
+            f'{form.return_by.data.strftime("%d %b %Y")}.',
+            'success',
+        )
+        return redirect(url_for('rentals.my_rentals'))
+
+    return render_template('rentals/request.html', form=form, item=item, max_return=max_return)
+
+
+@rentals_bp.route('/my')
+@login_required
+def my_rentals():
+    """View current user's active and past rentals."""
+    _sync_overdue()
+    active = (Rental.query
+              .filter(Rental.user_id == current_user.id,
+                      Rental.status.in_([Rental.STATUS_ACTIVE, Rental.STATUS_OVERDUE]))
+              .order_by(Rental.return_by)
+              .all())
+    history = (Rental.query
+               .filter_by(user_id=current_user.id, status=Rental.STATUS_RETURNED)
+               .order_by(Rental.returned_at.desc())
+               .limit(15)
+               .all())
+    return render_template('rentals/my_rentals.html', active=active, history=history)
+
+
+@rentals_bp.route('/return/<int:rental_id>', methods=['POST'])
+@login_required
+def return_rental(rental_id):
+    """Mark a rental as returned."""
+    rental = Rental.query.get_or_404(rental_id)
+
+    if rental.user_id != current_user.id and not current_user.is_admin:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('rentals.my_rentals'))
+
+    if rental.status == Rental.STATUS_RETURNED:
+        flash('This rental has already been returned.', 'info')
+    else:
+        rental.status = Rental.STATUS_RETURNED
+        rental.returned_at = datetime.utcnow()
+        db.session.commit()
+
+        log_event(
+            event_type=AuditLog.EVENT_UPDATE,
+            description=(f'{current_user.username} returned '
+                         f'"{rental.item.name}" (rental #{rental.id})'),
+            resource_type='Rental',
+            resource_id=rental.id,
+        )
+        flash(f'{rental.item.name} marked as returned. Thanks!', 'success')
+
+    if current_user.is_admin:
+        return redirect(url_for('rentals.admin_rentals'))
+    return redirect(url_for('rentals.my_rentals'))
+
+
+# Admin routes
+
+@rentals_bp.route('/admin')
+@login_required
+@admin_required
+def admin_rentals():
+    """Admin view of all active and recent rentals."""
+    _sync_overdue()
+    active = (Rental.query
+              .filter(Rental.status.in_([Rental.STATUS_ACTIVE, Rental.STATUS_OVERDUE]))
+              .order_by(Rental.return_by)
+              .all())
+    recent_returned = (Rental.query
+                       .filter_by(status=Rental.STATUS_RETURNED)
+                       .order_by(Rental.returned_at.desc())
+                       .limit(20)
+                       .all())
+    return render_template('rentals/admin_rentals.html',
+                           active=active,
+                           recent_returned=recent_returned)
+
+
+@rentals_bp.route('/admin/remind/<int:rental_id>', methods=['POST'])
+@login_required
+@admin_required
+def send_reminder(rental_id):
+    rental = Rental.query.get_or_404(rental_id)
+    notif = Notification(
+        user_id=rental.user_id,
+        rental_id=rental.id,
+        message=(f'Reminder: your rental of "{rental.item.name}" is overdue. '
+                 f'Please return it as soon as possible.'),
+    )
+    db.session.add(notif)
+    db.session.commit()
+    log_event(
+        event_type=AuditLog.EVENT_UPDATE,
+        description=(f'Admin sent overdue reminder to {rental.borrower.username} '
+                     f'for rental #{rental.id} ({rental.item.name})'),
+        resource_type='Rental',
+        resource_id=rental.id,
+    )
+    flash(f'Reminder sent to {rental.borrower.full_name}.', 'success')
+    return redirect(request.referrer or url_for('main.dashboard'))
+
+
+@rentals_bp.route('/notifications/mark-read', methods=['POST'])
+@login_required
+def mark_notifications_read():
+    (Notification.query
+     .filter_by(user_id=current_user.id, is_read=False)
+     .update({'is_read': True}))
+    db.session.commit()
+    return redirect(request.referrer or url_for('main.dashboard'))
+
+
+@rentals_bp.route('/admin/items')
+@login_required
+@admin_required
+def admin_items():
+    """Manage the rental catalogueue."""
+    items = (RentalItem.query
+             .order_by(RentalItem.category, RentalItem.name)
+             .all())
+    return render_template('rentals/admin_items.html', items=items)
+
+
+@rentals_bp.route('/admin/items/new', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def new_item():
+    """Add a new item to the rental catalogueue."""
+    form = RentalItemForm()
+    form.is_active.data = True
+    if form.validate_on_submit():
+        item = RentalItem(
+            name=form.name.data,
+            category=form.category.data,
+            location=form.location.data,
+            description=form.description.data or '',
+            quantity_total=form.quantity_total.data,
+            is_active=form.is_active.data,
+        )
+        db.session.add(item)
+        db.session.commit()
+        log_event(
+            event_type=AuditLog.EVENT_CREATE,
+            description=f'Rental item added: {item.name} (qty: {item.quantity_total})',
+            resource_type='RentalItem',
+            resource_id=item.id,
+        )
+        flash(f'"{item.name}" added to the rental catalogue.', 'success')
+        return redirect(url_for('rentals.admin_items'))
+    return render_template('rentals/item_form.html', form=form, title='Add Rental Item', item=None)
+
+
+@rentals_bp.route('/admin/items/<int:item_id>/edit', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def edit_item(item_id):
+    """Edit an existing rental catalogue item."""
+    item = RentalItem.query.get_or_404(item_id)
+    form = RentalItemForm(obj=item)
+    if form.validate_on_submit():
+        item.name = form.name.data
+        item.category = form.category.data
+        item.location = form.location.data
+        item.description = form.description.data or ''
+        item.quantity_total = form.quantity_total.data
+        item.is_active = form.is_active.data
+        db.session.commit()
+        log_event(
+            event_type=AuditLog.EVENT_UPDATE,
+            description=f'Rental item updated: {item.name}',
+            resource_type='RentalItem',
+            resource_id=item.id,
+        )
+        flash(f'"{item.name}" updated.', 'success')
+        return redirect(url_for('rentals.admin_items'))
+    return render_template('rentals/item_form.html', form=form, title='Edit Rental Item', item=item)

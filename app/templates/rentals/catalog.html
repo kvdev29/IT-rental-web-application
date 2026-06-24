@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Rent a Device{% endblock %}
+{% block content %}
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Rent a Device</h1>
+    </div>
+    <a href="{{ url_for('rentals.my_rentals') }}" class="btn btn-outline">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        My Rentals
+    </a>
+</div>
+
+{# ── Location Tabs ── #}
+<div class="location-tabs">
+    {% for loc in locations %}
+    <a href="{{ url_for('rentals.catalog', location=loc) }}"
+       class="location-tab {% if active_location == loc %}location-tab-active{% endif %}">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        {{ loc }}
+    </a>
+    {% endfor %}
+</div>
+
+{% if items %}
+
+{% set categories = items | map(attribute='category') | unique | list %}
+{% for cat in categories %}
+{% set cat_items = items | selectattr('category', 'equalto', cat) | list %}
+
+<h2 class="catalog-category-heading">{{ cat }}</h2>
+<div class="rental-catalog-grid">
+    {% for item in cat_items %}
+    <div class="rental-card {% if not item.is_available %}rental-card-unavailable{% endif %}">
+        <div class="rental-card-img">
+            {% if item.image_filename %}
+                <img src="{{ url_for('static', filename='images/products/items/' + item.image_filename) }}" alt="{{ item.name }}">
+            {% elif item.category == 'Headset' %}
+                <img src="{{ url_for('static', filename='images/products/headset.jpg') }}" alt="Headset">
+            {% elif item.category == 'Keyboard' %}
+                <img src="{{ url_for('static', filename='images/products/keyboard.jpg') }}" alt="Keyboard">
+            {% elif item.category == 'Mouse' %}
+                <img src="{{ url_for('static', filename='images/products/mouse.jpg') }}" alt="Mouse">
+            {% elif item.category == 'Webcam' %}
+                <img src="{{ url_for('static', filename='images/products/webcam.jpg') }}" alt="Webcam">
+            {% elif item.category == 'Laptop' %}
+                <img src="{{ url_for('static', filename='images/products/laptop.jpg') }}" alt="Laptop">
+            {% elif item.category == 'Tablet' %}
+                <img src="{{ url_for('static', filename='images/products/tablet.jpg') }}" alt="Tablet">
+            {% elif item.category == 'Phone' %}
+                <img src="{{ url_for('static', filename='images/products/phone.jpg') }}" alt="Phone">
+            {% else %}
+                <img src="{{ url_for('static', filename='images/products/cable.jpg') }}" alt="Cable / Adapter">
+            {% endif %}
+        </div>
+        <div class="rental-card-body">
+            <div class="rental-card-name">{{ item.name }}</div>
+            {% if item.description %}
+            <div class="rental-card-desc">{{ item.description }}</div>
+            {% endif %}
+            <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;margin-top:.4rem;">
+                {% if item.is_available %}
+                {% set pct = (item.quantity_available / item.quantity_total * 100) | int %}
+                {% if pct <= 25 %}
+                <span class="badge" style="background:var(--danger-lt,#fde8e8);color:var(--danger);">
+                    {{ item.quantity_available }} of {{ item.quantity_total }} available
+                </span>
+                {% elif pct <= 60 %}
+                <span class="badge" style="background:var(--warning-lt,#fff3cd);color:var(--warning);">
+                    {{ item.quantity_available }} of {{ item.quantity_total }} available
+                </span>
+                {% else %}
+                <span class="badge" style="background:var(--success-lt);color:var(--success);">
+                    {{ item.quantity_available }} of {{ item.quantity_total }} available
+                </span>
+                {% endif %}
+                {% else %}
+                <span class="badge badge-decommissioned">All checked out</span>
+                {% endif %}
+            </div>
+        </div>
+        <div class="rental-card-action">
+            {% if item.is_available %}
+            <a href="{{ url_for('rentals.request_rental', item_id=item.id) }}" class="btn btn-primary btn-sm">
+                Rent
+            </a>
+            {% else %}
+            <button class="btn btn-outline btn-sm" disabled>Unavailable</button>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endfor %}
+
+{% else %}
+<div class="empty-state" style="margin-top:4rem;">
+    <h3>No devices at {{ active_location }}</h3>
+    <p>No items are currently listed for this office.</p>
+</div>
+{% endif %}
+
+{% endblock %}

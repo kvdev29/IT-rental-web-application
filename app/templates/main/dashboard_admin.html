@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Operations Dashboard</h1>
+    </div>
+    <div class="btn-group">
+        <a href="{{ url_for('rentals.admin_rentals') }}" class="btn btn-primary">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+            Manage Rentals
+        </a>
+        <a href="{{ url_for('assets.create_asset') }}" class="btn btn-outline">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            New Asset
+        </a>
+    </div>
+</div>
+
+
+{# ── Main Grid ── #}
+<div class="dashboard-grid">
+
+    {# Active & Overdue Rentals #}
+    <div class="card">
+        <div class="card-header">
+            Active Rentals
+            <a href="{{ url_for('rentals.admin_rentals') }}" class="btn btn-ghost btn-sm">Manage →</a>
+        </div>
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Device</th>
+                        <th>Borrowed By</th>
+                        <th>Return By</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for r in active_rentals %}
+                <tr>
+                    <td><strong>{{ r.item.name }}</strong></td>
+                    <td style="font-size:.85rem;">{{ r.borrower.full_name }}</td>
+                    <td style="font-size:.85rem;white-space:nowrap;{% if r.status == 'Overdue' %}color:var(--danger);font-weight:600;{% else %}color:var(--text-muted);{% endif %}">
+                        {{ r.return_by.strftime('%d %b %Y') }}
+                    </td>
+                    <td>
+                        {% if r.status == 'Overdue' %}
+                        <span class="badge badge-critical">Overdue</span>
+                        {% else %}
+                        <span class="badge badge-inprogress">Active</span>
+                        {% endif %}
+                    </td>
+                    <td style="white-space:nowrap;">
+                        {% if r.status == 'Overdue' %}
+                        <form method="POST" action="{{ url_for('rentals.send_reminder', rental_id=r.id) }}" style="margin:0;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            {% set already_reminded = r.notifications.count() > 0 %}
+                            <button type="submit" class="btn btn-sm {% if already_reminded %}btn-outline{% else %}btn-danger-sm{% endif %}" title="Send return reminder to {{ r.borrower.full_name }}">
+                                {% if already_reminded %}Remind Again{% else %}Send Reminder{% endif %}
+                            </button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="5">
+                        <div class="empty-state" style="padding:1.5rem;">
+                            <p>No active rentals</p>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {# Recent Audit Events #}
+    <div class="card">
+        <div class="card-header">
+            Recent Audit Events
+            <a href="{{ url_for('admin.audit_log') }}" class="btn btn-ghost btn-sm">Full log →</a>
+        </div>
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Event</th>
+                        <th>User</th>
+                        <th>IP</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for log in recent_logs %}
+                <tr>
+                    <td style="font-size:.8rem;white-space:nowrap;color:var(--text-muted);">
+                        {{ log.timestamp.strftime('%d %b %H:%M') }}
+                    </td>
+                    <td>
+                        <span class="ev-{{ log.event_type }}" style="font-size:.8rem;">{{ log.event_type }}</span>
+                    </td>
+                    <td style="font-size:.8rem;font-weight:500;">
+                        {{ log.user.username if log.user else '—' }}
+                    </td>
+                    <td style="font-size:.75rem;color:var(--text-muted);font-family:monospace;">
+                        {{ log.ip_address or '—' }}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="4">
+                        <div class="empty-state" style="padding:1.5rem;"><p>No events yet</p></div>
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Rent {{ item.name }}{% endblock %}
+{% block content %}
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Rent {{ item.name }}</h1>
+        <p class="page-subtitle">Fill in the details below to confirm your rental</p>
+    </div>
+    <a href="{{ url_for('rentals.catalog') }}" class="btn btn-ghost">← Back to catalogue</a>
+</div>
+
+<div style="max-width:520px;">
+    <div class="card" style="margin-bottom:1.5rem;">
+        <div class="card-body" style="padding:1.5rem;display:flex;align-items:center;gap:1.25rem;">
+            <div>
+                <div style="font-weight:600;font-size:1.05rem;">{{ item.name }}</div>
+                <div style="color:var(--text-muted);font-size:.85rem;margin-top:.2rem;">{{ item.category }}</div>
+                {% if item.description %}
+                <div style="color:var(--text-secondary);font-size:.85rem;margin-top:.4rem;">{{ item.description }}</div>
+                {% endif %}
+                <div style="margin-top:.5rem;">
+                    <span class="badge" style="background:var(--success-bg);color:var(--success);">
+                        {{ item.quantity_available }} available
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">Rental Details</div>
+        <div class="card-body" style="padding:1.5rem;">
+            <form method="POST" novalidate>
+                {{ form.hidden_tag() }}
+
+                <div class="form-group">
+                    {{ form.return_by.label(class="form-label") }}
+                    {{ form.return_by(class="form-control" + (" is-invalid" if form.return_by.errors else ""), type="date", max=max_return.strftime('%Y-%m-%d')) }}
+                    {% for e in form.return_by.errors %}
+                    <div class="invalid-feedback">{{ e }}</div>
+                    {% endfor %}
+                    <div class="form-hint">Maximum rental period is {% if current_user.is_guest %}1 day{% else %}7 days{% endif %} (return by {{ max_return.strftime('%d %b %Y') }} at the latest)</div>
+                </div>
+
+                <div class="form-group">
+                    {{ form.notes.label(class="form-label") }}
+                    {{ form.notes(class="form-control" + (" is-invalid" if form.notes.errors else ""), rows=3, placeholder="e.g. For the all-hands meeting in room 3B") }}
+                    {% for e in form.notes.errors %}
+                    <div class="invalid-feedback">{{ e }}</div>
+                    {% endfor %}
+                </div>
+
+                <div class="info-box info" style="margin-bottom:1.5rem;">
+                    <div>Your rental is <strong>auto-confirmed</strong> immediately. Please return the device by the date selected above.</div>
+                </div>
+
+                <div style="display:flex;gap:.75rem;">
+                    {{ form.submit(class="btn btn-primary") }}
+                    <a href="{{ url_for('rentals.catalog') }}" class="btn btn-ghost">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{% block scripts %}
+<script>
+    const field = document.querySelector('input[type="date"][name="return_by"]');
+    if (field && !field.value) {
+        const today = new Date().toISOString().split('T')[0];
+        field.value = today;
+        field.min = today;
+    }
+</script>
+{% endblock %}
+{% endblock %}
