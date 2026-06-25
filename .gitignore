@@ -36,3 +36,4 @@ Thumbs.db
 
 # Migrations (optional – include if you want migration history)
 # migrations/
+.env
