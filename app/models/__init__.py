@@ -170,7 +170,7 @@ class RentalItem(db.Model):
 
     CATEGORY_CHOICES = ['Headset', 'Keyboard', 'Mouse', 'Webcam',
                         'Laptop', 'Tablet', 'Phone', 'Cable / Adapter', 'Other']
-    LOCATION_CHOICES = ['London', 'Hove', 'Cardiff']
+    LOCATION_CHOICES = ['London']
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False)
